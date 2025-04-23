@@ -7,6 +7,7 @@ const main = async () => {
   const result = await generateText({
     model: anthropic("claude-3-5-haiku-20241022"),
     prompt: "what is 9.88 - 9.67?",
+    maxSteps:2,
     tools : {
       subtractNumbers: {
         description: "Subtract two numbers",
@@ -22,6 +23,8 @@ const main = async () => {
 
   });
 
-  console.log("Result", result.toolResults);
+  console.log("Tool Result", result.toolResults);
+  console.log("Steps", result.steps);
+  console.log("Result", result.text)
 };
 main();
