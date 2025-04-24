@@ -3,6 +3,7 @@ import { generateObject, generateText, tool } from "ai";
 import "dotenv/config";
 import Exa from "exa-js";
 import { z } from "zod";
+import fs from "fs";
 
 const model = anthropic("claude-3-5-haiku-20241022");
 
@@ -199,11 +200,27 @@ const SYSTEM_PROMPT = `You are an expert researcher. Today is ${new Date().toISO
   - You may use high levels of speculation or prediction, just flag it for me.
   - Use Markdown formatting.`;
 
+const generateReport = async (research: Research) => {
+  const { text } = await generateText({
+    model,
+    system: SYSTEM_PROMPT,
+    prompt:
+      "Generate a report based on the following research data:\n\n" +
+      JSON.stringify(research, null, 2),
+  });
+  return text;
+};
+
 const main = async () => {
   // ------------------------- Deep Research ----------------------------------------
   const prompt =
     "How do i get hired at Lovable.dev as a software engineer, also link blogs,tweets or youtube videos by team members or founders";
-  await deepResearch(prompt, 3, 2);
+  const research = await deepResearch(prompt, 3, 2);
+  console.log("Research completed!");
+  console.log("Generating report...");
+  const report = await generateReport(research);
+  console.log("Report generated! report.md");
+  fs.writeFileSync("report.md", report);
 
   // ------------------------- Generate Text -----------------------------------------
 
