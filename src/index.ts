@@ -45,20 +45,23 @@ const searchWeb = async (query: string) => {
 
 // search and process
 
-const searchAndProcess = async (query: String) => {
+const searchAndProcess = async (
+  query: string,
+  accumulatedSources: SearchResult[]
+) => {
   const pendingSearchResults: SearchResult[] = [];
   const finalSearchResults: SearchResult[] = [];
-
   await generateText({
     model,
-    system: `You are a researcher. For each Query, search the web and then evaluate is the result is relevant and will help answer the following query`,
-    maxSteps: 5,
     prompt: `Search the web for information about ${query}`,
+    system:
+      "You are a researcher. For each query, search the web and then evaluate if the results are relevant and will help answer the following query",
+    maxSteps: 5,
     tools: {
       searchWeb: tool({
         description: "Search the web for information about a given query",
         parameters: z.object({
-          query: z.string(),
+          query: z.string().min(1),
         }),
         async execute({ query }) {
           const results = await searchWeb(query);
@@ -74,9 +77,15 @@ const searchAndProcess = async (query: String) => {
           const { object: evaluation } = await generateObject({
             model,
             prompt: `Evaluate whether the search results are relevant and will help answer the following query: ${query}. If the page already exists in the existing results, mark it as irrelevant.
+ 
             <search_results>
             ${JSON.stringify(pendingResult)}
             </search_results>
+ 
+            <existing_results>
+            ${JSON.stringify(accumulatedSources.map((result) => result.url))}
+            </existing_results>
+ 
             `,
             output: "enum",
             enum: ["relevant", "irrelevant"],
@@ -96,6 +105,27 @@ const searchAndProcess = async (query: String) => {
   return finalSearchResults;
 };
 
+type Learning = {
+  learning: string;
+  followUpQuestions: string[];
+};
+
+type Research = {
+  query: string | undefined;
+  queries: string[];
+  searchResults: SearchResult[];
+  learnings: Learning[];
+  completedQueries: string[];
+};
+
+const accumulatedResearch: Research = {
+  query: undefined,
+  queries: [],
+  searchResults: [],
+  learnings: [],
+  completedQueries: [],
+};
+
 const generateLearnings = async (query: string, searchResult: SearchResult) => {
   const { object } = await generateObject({
     model,
@@ -113,6 +143,48 @@ const generateLearnings = async (query: string, searchResult: SearchResult) => {
   return object;
 };
 
+const deepResearch = async (
+  prompt: string,
+  depth: number = 2,
+  breadth: number = 2
+) => {
+  if (!accumulatedResearch.query) {
+    accumulatedResearch.query = prompt;
+  }
+
+  if (depth === 0) {
+    return accumulatedResearch;
+  }
+
+  const queries = await generateSearchQueries(prompt, breadth);
+  accumulatedResearch.queries = queries;
+
+  for (const query of queries) {
+    console.log(`Searching the web for: ${query}`);
+    const searchResults = await searchAndProcess(
+      query,
+      accumulatedResearch.searchResults
+    );
+    accumulatedResearch.searchResults.push(...searchResults);
+    for (const searchResult of searchResults) {
+      console.log(`Processing search result: ${searchResult.url}`);
+      const learnings = await generateLearnings(query, searchResult);
+      accumulatedResearch.learnings.push(learnings);
+      accumulatedResearch.completedQueries.push(query);
+
+      const newQuery = `Overall research goal: ${prompt}
+        Previous search queries: ${accumulatedResearch.completedQueries.join(
+          ", "
+        )}
+ 
+        Follow-up questions: ${learnings.followUpQuestions.join(", ")}
+        `;
+      await deepResearch(newQuery, depth - 1, Math.ceil(breadth / 2));
+    }
+  }
+  return accumulatedResearch;
+};
+
 const SYSTEM_PROMPT = `You are an expert researcher. Today is ${new Date().toISOString()}. Follow these instructions when responding:
   - You may be asked to research subjects that is after your knowledge cutoff, assume the user is right when presented with news.
   - The user is a highly experienced analyst and software engineer, no need to simplify it, be as detailed as possible and make sure your response is correct.
@@ -125,24 +197,13 @@ const SYSTEM_PROMPT = `You are an expert researcher. Today is ${new Date().toISO
   - Value good arguments over authorities, the source is irrelevant.
   - Consider new technologies and contrarian ideas, not just the conventional wisdom.
   - You may use high levels of speculation or prediction, just flag it for me.
-  - Use Markdown formatting.` 
+  - Use Markdown formatting.`;
 
 const main = async () => {
   // ------------------------- Deep Research ----------------------------------------
   const prompt =
     "How do i get hired at Lovable.dev as a software engineer, also link blogs,tweets or youtube videos by team members or founders";
-  const queries = await generateSearchQueries(prompt, 3);
-  console.log("search queries", queries);
-  for (const query of queries) {
-    console.log(`Searching the web for: ${query}`);
-    const searchResults = await searchAndProcess(query);
-    console.log("searchResults", searchResults);
-    for (const searchResult of searchResults) {
-      console.log(`Processing search result: ${searchResult.url}`);
-      const learnings = await generateLearnings(query, searchResult);
-      console.log(`Learnings: ${learnings}`);
-    }
-  }
+  await deepResearch(prompt, 3, 2);
 
   // ------------------------- Generate Text -----------------------------------------
 
