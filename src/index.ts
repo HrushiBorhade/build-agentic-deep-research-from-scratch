@@ -11,6 +11,7 @@ async function generateSearchQueries(query: string, n: number) {
     object: { queries },
   } = await generateObject({
     model,
+    system: SYSTEM_PROMPT,
     prompt: `Generate ${n} search queries for the following query: ${query}`,
     schema: z.object({
       queries: z.array(z.string()).min(1).max(5),
@@ -52,6 +53,7 @@ const searchAndProcess = async (query: String) => {
     model,
     system: `You are a researcher. For each Query, search the web and then evaluate is the result is relevant and will help answer the following query`,
     maxSteps: 5,
+    prompt: `Search the web for information about ${query}`,
     tools: {
       searchWeb: tool({
         description: "Search the web for information about a given query",
@@ -94,16 +96,52 @@ const searchAndProcess = async (query: String) => {
   return finalSearchResults;
 };
 
+const generateLearnings = async (query: string, searchResult: SearchResult) => {
+  const { object } = await generateObject({
+    model,
+    prompt: `The user is researching "${query}". The following search result were deemed relevant.
+    Generate a learning and a follow-up question from the following search result:
+    <search_result>
+    ${JSON.stringify(searchResult)}
+    </search_result>
+    `,
+    schema: z.object({
+      learning: z.string(),
+      followUpQuestions: z.array(z.string()),
+    }),
+  });
+  return object;
+};
+
+const SYSTEM_PROMPT = `You are an expert researcher. Today is ${new Date().toISOString()}. Follow these instructions when responding:
+  - You may be asked to research subjects that is after your knowledge cutoff, assume the user is right when presented with news.
+  - The user is a highly experienced analyst and software engineer, no need to simplify it, be as detailed as possible and make sure your response is correct.
+  - Be highly organized.
+  - Suggest solutions that I didn't think about.
+  - Be proactive and anticipate my needs.
+  - Treat me as an expert in all subject matter.
+  - Mistakes erode my trust, so be accurate and thorough.
+  - Provide detailed explanations, I'm comfortable with lots of detail.
+  - Value good arguments over authorities, the source is irrelevant.
+  - Consider new technologies and contrarian ideas, not just the conventional wisdom.
+  - You may use high levels of speculation or prediction, just flag it for me.
+  - Use Markdown formatting.` 
+
 const main = async () => {
   // ------------------------- Deep Research ----------------------------------------
   const prompt =
-    "What do i need to do to get hired in top startups as Software Engineer in SF?";
+    "How do i get hired at Lovable.dev as a software engineer, also link blogs,tweets or youtube videos by team members or founders";
   const queries = await generateSearchQueries(prompt, 3);
   console.log("search queries", queries);
   for (const query of queries) {
     console.log(`Searching the web for: ${query}`);
     const searchResults = await searchAndProcess(query);
     console.log("searchResults", searchResults);
+    for (const searchResult of searchResults) {
+      console.log(`Processing search result: ${searchResult.url}`);
+      const learnings = await generateLearnings(query, searchResult);
+      console.log(`Learnings: ${learnings}`);
+    }
   }
 
   // ------------------------- Generate Text -----------------------------------------
